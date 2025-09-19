@@ -1,0 +1,942 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>JA4 Fingerprint Analysis</title>
+		<style>
+			* {
+				margin: 0;
+				padding: 0;
+				box-sizing: border-box;
+			}
+
+			body {
+				font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+				background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+				min-height: 100vh;
+				padding: 20px;
+			}
+
+			.container {
+				max-width: 1200px;
+				margin: 0 auto;
+			}
+
+			.header {
+				text-align: center;
+				color: white;
+				margin-bottom: 30px;
+			}
+
+			.header h1 {
+				font-size: 2.5rem;
+				margin-bottom: 10px;
+				font-weight: 300;
+			}
+
+			.header p {
+				font-size: 1.1rem;
+				opacity: 0.9;
+			}
+
+			.input-section {
+				background: white;
+				border-radius: 12px;
+				padding: 30px;
+				margin-bottom: 30px;
+				box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+			}
+
+			.input-group {
+				margin-bottom: 20px;
+			}
+
+			.input-group label {
+				display: block;
+				margin-bottom: 8px;
+				font-weight: 600;
+				color: #333;
+			}
+
+			.input-group input {
+				width: 100%;
+				padding: 12px 16px;
+				border: 2px solid #e1e5e9;
+				border-radius: 8px;
+				font-size: 16px;
+				transition: border-color 0.3s;
+			}
+
+			.input-group input:focus {
+				outline: none;
+				border-color: #667eea;
+			}
+
+			.analyze-btn {
+				background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+				color: white;
+				border: none;
+				padding: 14px 28px;
+				border-radius: 8px;
+				font-size: 16px;
+				font-weight: 600;
+				cursor: pointer;
+				transition: transform 0.2s, box-shadow 0.2s;
+				width: 100%;
+			}
+
+			.analyze-btn:hover {
+				transform: translateY(-2px);
+				box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+			}
+
+			.analyze-btn:disabled {
+				opacity: 0.6;
+				cursor: not-allowed;
+				transform: none;
+			}
+
+			.loading {
+				display: none;
+				text-align: center;
+				padding: 20px;
+				color: #667eea;
+			}
+
+			.spinner {
+				border: 3px solid #f3f3f3;
+				border-top: 3px solid #667eea;
+				border-radius: 50%;
+				width: 30px;
+				height: 30px;
+				animation: spin 1s linear infinite;
+				margin: 0 auto 10px;
+			}
+
+			@keyframes spin {
+				0% { transform: rotate(0deg); }
+				100% { transform: rotate(360deg); }
+			}
+
+			.results {
+				display: none;
+				background: white;
+				border-radius: 12px;
+				padding: 30px;
+				box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+			}
+
+			.results h2 {
+				color: #333;
+				margin-bottom: 20px;
+				font-size: 1.5rem;
+			}
+
+			.fingerprint-card {
+				background: #f8f9fa;
+				border-radius: 8px;
+				padding: 20px;
+				margin-bottom: 20px;
+				border-left: 4px solid #667eea;
+			}
+
+			.data-table {
+				width: 100%;
+				border-collapse: collapse;
+				margin-bottom: 20px;
+				background: white;
+				border-radius: 8px;
+				overflow: hidden;
+				box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+			}
+
+			.data-table th {
+				background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+				color: white;
+				padding: 12px 16px;
+				text-align: left;
+				font-weight: 600;
+				border-bottom: 2px solid #5a67d8;
+			}
+
+			.data-table td {
+				padding: 10px 16px;
+				border-bottom: 1px solid #e2e8f0;
+			}
+
+			.data-table tr:last-child td {
+				border-bottom: none;
+			}
+
+			.data-table tr:hover {
+				background-color: #f7fafc;
+			}
+
+			.table-container {
+				margin-bottom: 30px;
+			}
+
+			.table-title {
+				font-size: 1.3rem;
+				font-weight: 600;
+				color: #2d3748;
+				margin-bottom: 15px;
+				display: flex;
+				align-items: center;
+				gap: 10px;
+			}
+
+			.signal-value {
+				font-weight: 600;
+				color: #667eea;
+			}
+
+			.count-badge {
+				background: #667eea;
+				color: white;
+				padding: 2px 8px;
+				border-radius: 4px;
+				font-size: 0.9rem;
+				font-weight: 600;
+			}
+
+			.fingerprint-hash {
+				font-family: 'Monaco', 'Menlo', monospace;
+				background: #e9ecef;
+				padding: 8px 12px;
+				border-radius: 4px;
+				word-break: break-all;
+				margin-bottom: 15px;
+			}
+
+			.stats-grid {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+				gap: 15px;
+				margin-bottom: 20px;
+			}
+
+			.stat-item {
+				text-align: center;
+				padding: 15px;
+				background: white;
+				border-radius: 8px;
+				box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+			}
+
+			.stat-value {
+				font-size: 1.5rem;
+				font-weight: 700;
+				color: #667eea;
+				margin-bottom: 5px;
+			}
+
+			.stat-label {
+				font-size: 0.9rem;
+				color: #666;
+			}
+
+			.ai-analysis {
+				background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+				border-radius: 12px;
+				padding: 25px;
+				margin-top: 30px;
+				border: 2px solid #dee2e6;
+				box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+			}
+
+			.ai-analysis h3 {
+				color: #dc3545;
+				margin-bottom: 20px;
+				font-size: 1.8rem;
+				display: flex;
+				align-items: center;
+				gap: 10px;
+			}
+			
+			.ai-analysis-icon {
+				display: inline-block;
+				width: 32px;
+				height: 32px;
+				background: #dc3545;
+				border-radius: 50%;
+				color: white;
+				text-align: center;
+				line-height: 32px;
+				font-weight: bold;
+				font-size: 18px;
+			}
+
+			.ai-analysis pre {
+				white-space: pre-wrap;
+				word-wrap: break-word;
+				line-height: 1.8;
+				color: #212529;
+				font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+				font-size: 15px;
+				background: white;
+				padding: 20px;
+				border-radius: 8px;
+				box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);
+			}
+			
+			.ai-loading {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				padding: 30px;
+				color: #6c757d;
+				flex-direction: column;
+				gap: 15px;
+			}
+			
+			.risk-badge {
+				display: inline-block;
+				padding: 5px 12px;
+				border-radius: 4px;
+				font-weight: 600;
+				margin-left: 10px;
+				text-transform: uppercase;
+				font-size: 0.9rem;
+				letter-spacing: 0.5px;
+			}
+			
+			.risk-low { background: #28a745; color: white; }
+			.risk-medium { background: #ffc107; color: #212529; }
+			.risk-high { background: #fd7e14; color: white; }
+			.risk-critical { background: #dc3545; color: white; }
+
+			.soc-badge {
+				display: inline-block;
+				background: #dc3545;
+				color: white;
+				padding: 4px 12px;
+				border-radius: 4px;
+				font-size: 0.85rem;
+				font-weight: 600;
+				text-transform: uppercase;
+				letter-spacing: 0.5px;
+			}
+
+			.error {
+				display: none;
+				background: #f8d7da;
+				color: #721c24;
+				padding: 15px;
+				border-radius: 8px;
+				margin-top: 20px;
+				border-left: 4px solid #dc3545;
+			}
+
+			@media (max-width: 768px) {
+				.header h1 {
+					font-size: 2rem;
+				}
+				.input-section, .results {
+					padding: 20px;
+				}
+				.stats-grid {
+					grid-template-columns: 1fr;
+				}
+			}
+		</style>
+	</head>
+	<body>
+		<div class="container">
+			<div class="header">
+				<h1>JA4 Fingerprint Analysis</h1>
+			</div>
+
+			<div class="input-section">
+				<div class="input-group">
+					<label for="ja4-input">JA4 Fingerprint *</label>
+					<input 
+						type="text" 
+						id="ja4-input" 
+						placeholder="Enter JA4 fingerprint hash (e.g., t13d141000_cbb2034c60b8_e7c285222651)"
+						autocomplete="off"
+						required
+					>
+					<small style="color: #666; font-size: 0.9rem; margin-top: 5px; display: block;">* Required field - Enter the specific JA4 fingerprint you want to analyze</small>
+				</div>
+				<button id="analyze-btn" class="analyze-btn">Analyze JA4 Fingerprint</button>
+			</div>
+
+			<div id="loading" class="loading">
+				<div class="spinner"></div>
+				<p>Analyzing logs and generating AI insights...</p>
+			</div>
+
+			<div id="error" class="error"></div>
+
+			<div id="results" class="results">
+				<h2>Analysis Results</h2>
+				<div id="results-content"></div>
+			</div>
+		</div>
+
+		<script>
+			const analyzeBtn = document.getElementById('analyze-btn');
+			const ja4Input = document.getElementById('ja4-input');
+			const loading = document.getElementById('loading');
+			const results = document.getElementById('results');
+			const resultsContent = document.getElementById('results-content');
+			const errorDiv = document.getElementById('error');
+
+			analyzeBtn.addEventListener('click', async () => {
+				const ja4 = ja4Input.value.trim();
+				
+				// Validate JA4 input
+				if (!ja4) {
+					errorDiv.textContent = 'Error: Please enter a JA4 fingerprint';
+					errorDiv.style.display = 'block';
+					ja4Input.focus();
+					return;
+				}
+				
+				// Show loading state
+				analyzeBtn.disabled = true;
+				loading.style.display = 'block';
+				results.style.display = 'none';
+				errorDiv.style.display = 'none';
+
+				try {
+					const requestBody = { ja4 };
+					
+					const response = await fetch('/api/analyze', {
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json'
+						},
+						body: JSON.stringify(requestBody)
+					});
+
+					const data = await response.json();
+
+					if (!response.ok) {
+						throw new Error(data.message || 'Analysis failed');
+					}
+
+					displayResults(data);
+				} catch (error) {
+					errorDiv.textContent = `Error: ${error.message}`;
+					errorDiv.style.display = 'block';
+				} finally {
+					// Hide loading state
+					analyzeBtn.disabled = false;
+					loading.style.display = 'none';
+				}
+			});
+
+			function displayResults(data) {
+				if (data.message) {
+					errorDiv.textContent = data.message;
+					errorDiv.style.display = 'block';
+					return;
+				}
+
+				const analysis = data.analysis;
+				let html = '';
+
+				// Main stats overview
+				html += `
+					<div class="stats-grid">
+						<div class="stat-item">
+							<div class="stat-value">${analysis.totalRequests || 0}</div>
+							<div class="stat-label">Total Requests</div>
+						</div>
+						<div class="stat-item">
+							<div class="stat-value">${analysis.uniqueIPs || 0}</div>
+							<div class="stat-label">Unique IPs</div>
+						</div>
+						<div class="stat-item">
+							<div class="stat-value">${analysis.avgBotScore || 0}</div>
+							<div class="stat-label">Avg Bot Score</div>
+						</div>
+					</div>
+				`;
+
+				// Display JA4 fingerprint details
+				if (analysis.fingerprints && analysis.fingerprints.length > 0) {
+					const fp = analysis.fingerprints[0];
+					html += `
+						<div class="fingerprint-card">
+							<h3>JA4 Fingerprint</h3>
+							<div class="fingerprint-hash">${fp.ja4}</div>
+						</div>
+					`;
+				}
+
+				// Display daily activity over last 30 days
+				if (analysis.trafficBreakdown?.dailyActivity && analysis.trafficBreakdown.dailyActivity.length > 0) {
+					html += `
+						<div class="table-container">
+							<h3 class="table-title">Daily Activity (Last 30 Days)</h3>
+							<table class="data-table">
+								<thead>
+									<tr>
+										<th>Date</th>
+										<th>Request Count</th>
+										<th>Day of Week</th>
+									</tr>
+								</thead>
+								<tbody>
+									${analysis.trafficBreakdown.dailyActivity.map(day => {
+										const date = new Date(day.date);
+										const formattedDate = date.toLocaleDateString('en-US', {
+											month: 'short',
+											day: 'numeric',
+											year: 'numeric'
+										});
+										const dayOfWeek = date.toLocaleDateString('en-US', { weekday: 'short' });
+										return `
+											<tr>
+												<td><strong>${formattedDate}</strong></td>
+												<td><span class="count-badge">${day.count.toLocaleString()}</span></td>
+												<td>${dayOfWeek}</td>
+											</tr>
+										`;
+									}).join('')}
+								</tbody>
+							</table>
+						</div>
+					`;
+				}
+
+				// Display JA4 Signals in table format
+				if (analysis.ja4Signals && Object.keys(analysis.ja4Signals).length > 0) {
+					html += `
+						<div class="table-container">
+							<h3 class="table-title">JA4 Signals Analysis</h3>
+							<table class="data-table">
+								<thead>
+									<tr>
+										<th>Signal Name</th>
+										<th>Value</th>
+										<th>Description</th>
+									</tr>
+								</thead>
+								<tbody>
+									${getSignalRows(analysis.ja4Signals)}
+								</tbody>
+							</table>
+						</div>
+					`;
+				}
+
+				// Display traffic breakdown in tables
+				if (analysis.trafficBreakdown) {
+					const breakdown = analysis.trafficBreakdown;
+					
+					// Status codes table with hourly breakdown
+					if (breakdown.statusCodeDistribution && breakdown.statusCodeDistribution.length > 0) {
+						// Group data by hour and find all unique status codes
+						const hourlyData = {};
+						const allStatusCodes = new Set();
+						
+						breakdown.statusCodeDistribution.forEach(item => {
+							const hour = item.datetimeHour;
+							if (!hourlyData[hour]) {
+								hourlyData[hour] = {};
+							}
+							hourlyData[hour][item.status] = item.count;
+							allStatusCodes.add(item.status);
+						});
+						
+						// Sort status codes and hours
+						const sortedStatusCodes = Array.from(allStatusCodes).sort((a, b) => a - b);
+						const sortedHours = Object.keys(hourlyData).sort((a, b) => new Date(b) - new Date(a));
+						
+						// Function to get status color
+						const getStatusColor = (status) => {
+							if (status >= 200 && status < 300) return '#28a745';
+							if (status >= 300 && status < 400) return '#17a2b8';
+							if (status >= 400 && status < 500) return '#ffc107';
+							if (status >= 500) return '#dc3545';
+							return '#6c757d';
+						};
+						
+						html += `
+							<div class="table-container">
+								<h3 class="table-title">Hourly Status Code Distribution</h3>
+								<table class="data-table">
+									<thead>
+										<tr>
+											<th>Time (UTC)</th>
+											${sortedStatusCodes.map(code => `
+												<th style="text-align: center; color: ${getStatusColor(code)};">${code}</th>
+											`).join('')}
+											<th style="text-align: center;">Total</th>
+										</tr>
+									</thead>
+									<tbody>
+										${sortedHours.map(hour => {
+											const date = new Date(hour);
+											const formattedTime = date.toLocaleDateString('en-US', { 
+												month: 'short', 
+												day: 'numeric',
+												hour: '2-digit',
+												minute: '2-digit',
+												timeZone: 'UTC'
+											});
+											const data = hourlyData[hour];
+											const total = Object.values(data).reduce((sum, count) => sum + count, 0);
+											return `
+												<tr>
+													<td><strong>${formattedTime}</strong></td>
+													${sortedStatusCodes.map(code => `
+														<td style="text-align: center;">${data[code] || '-'}</td>
+													`).join('')}
+													<td style="text-align: center;"><span class="count-badge">${total.toLocaleString()}</span></td>
+												</tr>
+											`;
+										}).join('')}
+									</tbody>
+								</table>
+							</div>
+						`;
+					}
+
+					// Hostnames table
+					if (breakdown.topHostnames && breakdown.topHostnames.length > 0) {
+						html += `
+							<div class="table-container">
+								<h3 class="table-title">Top Hostnames</h3>
+								<table class="data-table">
+									<thead>
+										<tr>
+											<th>Hostname</th>
+											<th>Request Count</th>
+										</tr>
+									</thead>
+									<tbody>
+										${breakdown.topHostnames.map(item => `
+											<tr>
+												<td>${item.hostname || '[No hostname]'}</td>
+												<td><span class="count-badge">${item.count}</span></td>
+											</tr>
+										`).join('')}
+									</tbody>
+								</table>
+							</div>
+						`;
+					}
+
+					// Top paths table
+					if (breakdown.topPaths && breakdown.topPaths.length > 0) {
+						html += `
+							<div class="table-container">
+								<h3 class="table-title">Top Request Paths</h3>
+								<table class="data-table">
+									<thead>
+										<tr>
+											<th>Request Path</th>
+											<th>Query Parameters</th>
+											<th>Request Count</th>
+										</tr>
+									</thead>
+									<tbody>
+										${breakdown.topPaths.map(item => `
+											<tr>
+												<td style="font-family: monospace; word-break: break-all;">${item.path}</td>
+												<td style="font-family: monospace; word-break: break-all; color: #6c757d;">${item.query ? '?' + item.query : ''}</td>
+												<td><span class="count-badge">${item.count}</span></td>
+											</tr>
+										`).join('')}
+									</tbody>
+								</table>
+							</div>
+						`;
+					}
+
+					// ASN distribution table
+					if (breakdown.asnDistribution && breakdown.asnDistribution.length > 0) {
+						html += `
+							<div class="table-container">
+								<h3 class="table-title">ASN Distribution</h3>
+								<table class="data-table">
+									<thead>
+										<tr>
+											<th>ASN</th>
+											<th>Description</th>
+											<th>Request Count</th>
+										</tr>
+									</thead>
+									<tbody>
+										${breakdown.asnDistribution.map(item => `
+											<tr>
+												<td>AS${item.asn}</td>
+												<td>${item.asnDescription || 'Unknown'}</td>
+												<td><span class="count-badge">${item.count}</span></td>
+											</tr>
+										`).join('')}
+									</tbody>
+								</table>
+							</div>
+						`;
+					}
+
+					// WAF Attack Scores per hour
+					if (breakdown.wafAttackScores && breakdown.wafAttackScores.length > 0) {
+						// Filter to only include hours with attack scores > 0
+						const scoresWithAttacks = breakdown.wafAttackScores.filter(item => 
+							item.overallScore > 0 || item.rceScore > 0 || item.sqliScore > 0 || item.xssScore > 0
+						);
+						
+						if (scoresWithAttacks.length > 0) {
+							html += `
+								<div class="table-container">
+									<h3 class="table-title">WAF Attack Scores (Hourly)</h3>
+									<table class="data-table">
+										<thead>
+											<tr>
+												<th>Time (UTC)</th>
+												<th>Overall Score</th>
+												<th>RCE Score</th>
+												<th>SQL Injection</th>
+												<th>XSS Score</th>
+												<th>Requests</th>
+											</tr>
+										</thead>
+										<tbody>
+											${scoresWithAttacks.map(item => {
+												const date = new Date(item.hour);
+												const formattedTime = date.toLocaleDateString('en-US', { 
+													month: 'short', 
+													day: 'numeric',
+													hour: '2-digit',
+													minute: '2-digit',
+													timeZone: 'UTC'
+												});
+												
+												// Helper function to get color based on score
+												const getScoreColor = (score) => {
+													if (score >= 60) return '#dc3545'; // High - red
+													if (score >= 30) return '#ffc107'; // Medium - yellow
+													if (score > 0) return '#17a2b8';  // Low - blue
+													return '#6c757d'; // None - gray
+												};
+												
+												// Helper function to format score with color
+												const formatScore = (score) => {
+													const color = getScoreColor(score);
+													return `<span style="color: ${color}; font-weight: bold;">${score}</span>`;
+												};
+												
+												return `
+													<tr>
+														<td><strong>${formattedTime}</strong></td>
+														<td>${formatScore(item.overallScore)}</td>
+														<td>${formatScore(item.rceScore)}</td>
+														<td>${formatScore(item.sqliScore)}</td>
+														<td>${formatScore(item.xssScore)}</td>
+														<td><span class="count-badge">${item.count}</span></td>
+													</tr>
+												`;
+											}).join('')}
+										</tbody>
+									</table>
+								</div>
+							`;
+						}
+					}
+
+					// Top WAF rules triggered table
+					if (breakdown.topWafRules && breakdown.topWafRules.length > 0) {
+						html += `
+							<div class="table-container">
+								<h3 class="table-title">Top WAF Rules Triggered</h3>
+								<table class="data-table">
+									<thead>
+										<tr>
+											<th>Rule ID</th>
+											<th>Action</th>
+											<th>Source</th>
+											<th>Trigger Count</th>
+										</tr>
+									</thead>
+									<tbody>
+										${breakdown.topWafRules.map(item => `
+											<tr>
+												<td><code>${item.ruleId}</code></td>
+												<td>${item.action}</td>
+												<td>${item.source}</td>
+												<td><span class="count-badge">${item.count}</span></td>
+											</tr>
+										`).join('')}
+									</tbody>
+								</table>
+							</div>
+						`;
+					}
+
+					// Top IP addresses table
+					if (breakdown.topIPs && breakdown.topIPs.length > 0) {
+						html += `
+							<div class="table-container">
+								<h3 class="table-title">Top IP Addresses</h3>
+								<table class="data-table">
+									<thead>
+										<tr>
+											<th>IP Address</th>
+											<th>Country</th>
+											<th>Request Count</th>
+										</tr>
+									</thead>
+									<tbody>
+										${breakdown.topIPs.map(item => `
+											<tr>
+												<td><code>${item.ip}</code></td>
+												<td>${item.country}</td>
+												<td><span class="count-badge">${item.count}</span></td>
+											</tr>
+										`).join('')}
+									</tbody>
+								</table>
+							</div>
+						`;
+					}
+
+					// User agents table
+					if (breakdown.topUserAgents && breakdown.topUserAgents.length > 0) {
+						html += `
+							<div class="table-container">
+								<h3 class="table-title">Top User Agents</h3>
+								<table class="data-table">
+									<thead>
+										<tr>
+											<th>User Agent</th>
+											<th>Request Count</th>
+										</tr>
+									</thead>
+									<tbody>
+										${breakdown.topUserAgents.map(item => {
+											const truncatedUA = item.userAgent.length > 100 ? item.userAgent.substring(0, 100) + '...' : item.userAgent;
+											return `
+												<tr>
+													<td style="word-break: break-all;">${truncatedUA}</td>
+													<td><span class="count-badge">${item.count}</span></td>
+												</tr>
+											`;
+										}).join('')}
+									</tbody>
+								</table>
+							</div>
+						`;
+					}
+					
+					// AI Security Analysis Section
+					if (data.aiSecurityAnalysis) {
+						html += `
+							<div class="ai-analysis">
+								<h3>
+									<span class="ai-analysis-icon">AI</span>
+									Security Analysis
+								</h3>
+								<div>
+									${formatAIAnalysis(data.aiSecurityAnalysis)}
+								</div>
+							</div>
+						`;
+					}
+				}
+
+				if (!html) {
+					html = `
+						<div class="fingerprint-card">
+							<h3>No Data Found</h3>
+							<p>No data was found for the JA4 fingerprint: ${analysis.targetJA4}</p>
+							<p>This could mean the fingerprint hasn't been seen in your Cloudflare logs recently.</p>
+						</div>
+					`;
+				}
+
+				resultsContent.innerHTML = html;
+				results.style.display = 'block';
+			}
+
+			// Helper function to get signal descriptions
+			function getSignalRows(signals) {
+				const signalDescriptions = {
+					'browser_ratio_1h': 'Browser-Originated Traffic Ratio (High = real browsers, Low = bots)',
+					'cache_ratio_1h': 'Cacheable Response Ratio (High = static content, Low = dynamic/API)',
+					'h2h3_ratio_1h': 'HTTP/2 & HTTP/3 Usage (High = modern clients, Low = legacy/automated)',
+					'heuristic_ratio_1h': 'Anomaly Detection Ratio (High = suspicious behavior)',
+					'ips_quantile_1h': 'IP Distribution Quantile (High = abnormal IP distribution)',
+					'ips_rank_1h': 'Unique Source IP Rank (Low = wide distribution/botnet)',
+					'paths_rank_1h': 'URL Path Diversity (Low = crawler behavior, High = focused access)',
+					'reqs_quantile_1h': 'Request Volume Quantile (High = unusually high traffic)',
+					'reqs_rank_1h': 'Request Volume Rank (Low rank = high volume)',
+					'uas_rank_1h': 'User-Agent Diversity (Low = many different UAs/evasion)'
+				};
+
+				return Object.entries(signals).map(([key, value]) => `
+					<tr>
+						<td><strong>${key}</strong></td>
+						<td><span class="signal-value">${value}</span></td>
+						<td>${signalDescriptions[key] || 'N/A'}</td>
+					</tr>
+				`).join('');
+			}
+			
+			// Helper function to format AI analysis with proper styling
+			function formatAIAnalysis(aiData) {
+				if (!aiData || !aiData.securityAnalysis) {
+					return `<div class="ai-loading">Security analysis not available</div>`;
+				}
+				
+				const analysis = aiData.securityAnalysis;
+				let formattedAnalysis = analysis;
+				
+				// Try to extract risk level and add badge
+				const riskLevels = ['low', 'medium', 'high', 'critical'];
+				let riskLevel = null;
+				
+				for (const level of riskLevels) {
+					if (analysis.toLowerCase().includes(`risk assessment: ${level}`) || 
+						analysis.toLowerCase().includes(`risk: ${level}`) ||
+						analysis.toLowerCase().includes(`overall risk: ${level}`)) {
+						riskLevel = level;
+						break;
+					}
+				}
+				
+				// Format with sections and risk badge if found
+				let html = '<div>';
+				
+				if (riskLevel) {
+					html += `<h4>Overall Risk Assessment <span class="risk-badge risk-${riskLevel}">${riskLevel}</span></h4>`;
+				}
+				
+				// Convert analysis text to HTML with proper formatting
+				formattedAnalysis = formattedAnalysis
+					.replace(/\n\n/g, '</p><p>')
+					.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+					.replace(/\*([^*]+)\*/g, '<em>$1</em>')
+					.replace(/^(#+)\s+(.+)$/gm, (match, hashes, title) => {
+						const level = hashes.length + 3; // h4, h5, etc.
+						return `<h${level}>${title}</h${level}>`;
+					})
+					.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>')
+					.replace(/^-\s+(.+)$/gm, '<li>$1</li>');
+					
+				// Wrap lists in ul tags
+				formattedAnalysis = formattedAnalysis.replace(/(<li>.*?<\/li>)+/g, '<ul>$&</ul>');
+				
+				html += `<div class="ai-content">${formattedAnalysis}</div>`;
+				html += `<div class="ai-timestamp"><small>Generated: ${new Date(aiData.generatedAt).toLocaleString()}</small></div>`;
+				html += '</div>';
+				
+				return html;
+			}
+
+			// Allow Enter key to trigger analysis
+			ja4Input.addEventListener('keypress', (e) => {
+				if (e.key === 'Enter') {
+					analyzeBtn.click();
+				}
+			});
+		</script>
+	</body>
+</html>
