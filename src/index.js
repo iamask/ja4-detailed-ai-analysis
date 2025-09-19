@@ -317,51 +317,206 @@ async function generateAISecurityAnalysis(analysisData, env) {
 				'No daily activity data available'
 		};
 		
-		// Generate security insights using Cloudflare Workers AI
-		const prompt = `
-			You are a cybersecurity expert specializing in traffic analysis and threat detection.
-			Analyze the following JA4 fingerprint data and provide a concise security assessment.
-			Focus on identifying potential security risks, anomalies, or suspicious patterns.
-			
-			JA4 Fingerprint: ${ja4}
-			Total Requests: ${totalRequests}
-			Unique IPs: ${uniqueIPs}
-			Average Bot Score: ${avgBotScore}
-			
-			Signals: ${JSON.stringify(signals)}
-			
-			WAF Rules Triggered: ${JSON.stringify(wafRules)}
-			
-			Top IPs: ${JSON.stringify(topIPs)}
-			Top Paths: ${JSON.stringify(topPaths)}
-			Top Hostnames: ${JSON.stringify(topHostnames)}
-			Top User Agents: ${JSON.stringify(topUserAgents)}
-			
-			Provide a security assessment with these sections:
-			1. Overall Risk Assessment (Low/Medium/High/Critical)
-			2. Key Security Findings (3-5 bullet points)
-			3. Recommendations (2-3 actionable steps)
-			
-			Keep your analysis concise, professional, and focused on security implications.
-		`;
+		// Generate security insights using Cloudflare Workers AI with Llama 3.3 70B model
+		// Format the prompt as a conversation for the Llama model with clear instructions
+		const systemPrompt = `You are a cybersecurity expert specializing in traffic analysis and threat detection. 
+		You analyze network traffic patterns and provide concise, actionable security assessments.
+		Your analysis should be professional, focused on security implications, and formatted clearly.
 		
-		const aiResponse = await env.AI.run('@cf/openai/gpt-oss-120b', {
-			instructions: 'You are a cybersecurity expert providing concise, actionable security analysis.',
-			input: prompt,
-		});
+		FORMATTING REQUIREMENTS:
+		1. Start with EXACTLY ONE heading "Security Assessment" and nothing else before it
+		2. DO NOT include any other titles or headings like "Threat Intelligence" or "AI Analysis"
+		3. For the risk level, use a single clear statement like "Risk Level: Medium" (not multiple statements)
+		4. Format findings as a bulleted list with each item starting with "- " (not "include:" or other prefixes)
+		5. Format recommendations as a bulleted list with each item starting with "- " (not "include:" or other prefixes)
+		6. Keep your entire response clean, concise and well-structured
+		
+		When analyzing JA4 fingerprints, consider these metrics and their meanings:
+		- h2h3_ratio_1h: Ratio of HTTP/2 and HTTP/3 requests to total requests. Higher values indicate more modern protocols.
+		- heuristic_ratio_1h: Ratio of requests flagged by heuristic-based scoring. Higher values may indicate suspicious behavior.
+		- reqs_quantile_1h: Quantile position based on request count. Higher values mean more requests compared to other fingerprints.
+		- uas_rank_1h: Rank based on user agent diversity. Lower values indicate higher diversity of user agents.
+		- browser_ratio_1h: Ratio of browser-based requests. Higher values suggest legitimate browser traffic.
+		- paths_rank_1h: Rank based on unique request paths. Lower values indicate higher path diversity.
+		- reqs_rank_1h: Rank based on request count. Lower values indicate higher request volumes.
+		- cache_ratio_1h: Ratio of cacheable responses. Higher values suggest normal web browsing behavior.
+		- ips_rank_1h: Rank based on unique client IPs. Lower values indicate traffic from many different IPs.
+		- ips_quantile_1h: Quantile position based on unique client IPs. Higher values mean more unique IPs than most fingerprints.`;
+		
+		// Create a clean, structured user prompt with the data
+		const userPrompt = `Analyze the following JA4 fingerprint data and provide a security assessment.
+		
+		## Traffic Data
+		- JA4 Fingerprint: ${ja4}
+		- Total Requests: ${totalRequests}
+		- Unique IPs: ${uniqueIPs}
+		- Average Bot Score: ${avgBotScore}
+		
+		## JA4 Metrics
+		- HTTP/2 & HTTP/3 Ratio: ${signals.h2h3_ratio_1h || 'N/A'}
+		- Heuristic Detection Ratio: ${signals.heuristic_ratio_1h || 'N/A'}
+		- Request Volume Quantile: ${signals.reqs_quantile_1h || 'N/A'}
+		- User Agent Diversity Rank: ${signals.uas_rank_1h || 'N/A'}
+		- Browser Traffic Ratio: ${signals.browser_ratio_1h || 'N/A'}
+		- Path Diversity Rank: ${signals.paths_rank_1h || 'N/A'}
+		- Request Volume Rank: ${signals.reqs_rank_1h || 'N/A'}
+		- Cache Response Ratio: ${signals.cache_ratio_1h || 'N/A'}
+		- IP Diversity Rank: ${signals.ips_rank_1h || 'N/A'}
+		- IP Diversity Quantile: ${signals.ips_quantile_1h || 'N/A'}
+		
+		## Security Signals
+		${JSON.stringify(signals, null, 2)}
+		
+		## WAF Rules Triggered
+		${JSON.stringify(wafRules, null, 2)}
+		
+		## Traffic Patterns
+		- Top IPs: ${JSON.stringify(topIPs)}
+		- Top Paths: ${JSON.stringify(topPaths)}
+		- Top Hostnames: ${JSON.stringify(topHostnames)}
+		- Top User Agents: ${JSON.stringify(topUserAgents)}
+		
+		Your response MUST follow this EXACT format:
+		1. Start with the heading "Security Assessment"
+		2. Include risk level assessment (Low/Medium/High/Critical)
+		3. Add a brief paragraph explaining the overall assessment
+		4. Include a "Key Findings:" section with 3-5 bullet points (each starting with "- ")
+		5. Include a "Recommendations:" section with 2-3 bullet points (each starting with "- ")
+		
+		DO NOT include any other headings, titles, or prefixes like "Threat Intelligence" or "include:".
+		Keep your analysis concise, professional, and focused on security implications.`;
+		
+		// Create messages array for the Llama 3.3 model
+		const messages = [
+			{ role: "system", content: systemPrompt },
+			{ role: "user", content: userPrompt }
+		];
+		
+		// Call the Llama 3.3 70B model with error handling
+		let aiResponse;
+		try {
+			// According to the docs, we need to use the messages format with optimized parameters
+			aiResponse = await env.AI.run("@cf/meta/llama-3.3-70b-instruct-fp8-fast", { 
+				messages,
+				max_tokens: 1024, // Increase max tokens to avoid truncation
+				temperature: 0.3, // Lower temperature for more consistent, focused responses
+				top_p: 0.95, // Higher top_p for better quality while maintaining focus
+				top_k: 40, // Limit token selection to improve coherence
+				repetition_penalty: 1.2 // Discourage repetitive text
+			});
+			
+			console.log('AI response type:', typeof aiResponse);
+			console.log('AI response structure:', JSON.stringify(aiResponse).substring(0, 200));
+			
+		} catch (error) {
+			console.error('AI model error:', error);
+			// Provide a fallback analysis based on the data we have
+			return {
+				securityAnalysis: generateFallbackAnalysis(ja4, totalRequests, uniqueIPs, wafRules),
+				generatedAt: new Date().toISOString(),
+				isAIFallback: true
+			};
+		}
+		
+		// Extract the security analysis text from the AI response
+		// The Llama 3.3 model returns an object with a 'response' property
+		const extractSecurityAnalysis = (response) => {
+			// Check for null or undefined response
+			if (!response) {
+				console.warn('AI response is null or undefined');
+				return 'Unable to generate security analysis';
+			}
+			
+			// Handle different response formats
+			if (typeof response === 'string') {
+				return response; // Already a string, use directly
+			}
+			
+			if (typeof response === 'object') {
+				// Check for common response properties in different AI models
+				if (response.response) {
+					return response.response; // Llama 3.3 format
+				}
+				
+				// Try to find any meaningful string content
+				const stringProps = Object.entries(response)
+					.filter(([_, value]) => typeof value === 'string' && value.trim().length > 10)
+					.map(([_, value]) => value);
+				
+				if (stringProps.length > 0) {
+					// Use the longest string as it's likely the main content
+					return stringProps.reduce((a, b) => a.length > b.length ? a : b);
+				}
+				
+				// If we can't find a suitable string property, stringify the object
+				try {
+					return JSON.stringify(response, null, 2);
+				} catch (e) {
+					console.error('Error stringifying AI response:', e);
+					return 'Error processing AI response';
+				}
+			}
+			
+			// Fallback for unexpected response types
+			return `Unable to process response of type ${typeof response}`;
+		};
+		
+		// Extract the security analysis text
+		const securityAnalysisText = extractSecurityAnalysis(aiResponse);
+		
+		// Log a sample of the extracted text for debugging
+		if (securityAnalysisText) {
+			const previewLength = Math.min(100, securityAnalysisText.length);
+			console.log(`Extracted analysis (${securityAnalysisText.length} chars): ${securityAnalysisText.substring(0, previewLength)}...`);
+		} else {
+			console.warn('Extracted security analysis is empty');
+		}
 		
 		return {
-			securityAnalysis: aiResponse,
-			generatedAt: new Date().toISOString()
+			securityAnalysis: securityAnalysisText,
+			generatedAt: new Date().toISOString(),
+			isAIGenerated: true
 		};
 	} catch (error) {
 		console.error('Error generating AI security analysis:', error);
 		return {
-			securityAnalysis: 'Unable to generate security analysis at this time.',
+			securityAnalysis: generateFallbackAnalysis(ja4, totalRequests, uniqueIPs, wafRules),
 			error: error.message,
-			generatedAt: new Date().toISOString()
+			generatedAt: new Date().toISOString(),
+			isAIFallback: true
 		};
 	}
+}
+
+/**
+ * Generate a fallback security analysis when AI model fails
+ */
+function generateFallbackAnalysis(ja4, totalRequests, uniqueIPs, wafRules) {
+	// Determine risk level based on available data
+	let riskLevel = 'low';
+	if (wafRules && wafRules.length > 0) {
+		riskLevel = 'medium';
+	}
+	
+	// Create a structured analysis with a single heading and consistent format
+	return `
+		Security Assessment
+
+		Risk Level: ${riskLevel.toUpperCase()}
+		
+		Based on the available data for JA4 fingerprint ${ja4}, a preliminary risk assessment has been generated. This fingerprint has generated ${totalRequests || 0} requests from ${uniqueIPs || 0} unique IP addresses. ${wafRules && wafRules.length > 0 ? `There are ${wafRules.length} WAF rules triggered by this fingerprint, which may indicate suspicious activity.` : 'No WAF rules were triggered by this fingerprint.'}
+
+		Key Findings:
+		- JA4 fingerprint analysis shows ${totalRequests || 0} total requests in the analyzed time period
+		- Traffic originated from ${uniqueIPs || 0} unique IP addresses
+		${wafRules && wafRules.length > 0 ? `- WAF rules were triggered ${wafRules.length} times, suggesting potential security concerns` : '- No WAF rules were triggered, suggesting normal traffic patterns'}
+		- Limited data is available for a comprehensive analysis
+
+		Recommendations:
+		- Continue monitoring this JA4 fingerprint for changes in behavior
+		- Implement additional logging to gather more context about this traffic
+		- Consider rate limiting if traffic volume increases significantly
+	`;
 }
 
 /**
@@ -470,10 +625,19 @@ async function handleAnalysis(request, env, ctx) {
 
 		// Structure JA4 signals from GraphQL data
 		const ja4SignalsData = {};
+		
+		// Extract JA4 signals including metrics
 		if (analysisData.ja4Signals?.viewer?.accounts?.[0]?.httpRequestsAdaptive?.[0]?.ja4Signals) {
 			analysisData.ja4Signals.viewer.accounts[0].httpRequestsAdaptive[0].ja4Signals.forEach(signal => {
 				ja4SignalsData[signal.signalName] = signal.signalValue;
 			});
+			
+			// Log the available signals for debugging
+			console.log('Available JA4 signals:', 
+				analysisData.ja4Signals.viewer.accounts[0].httpRequestsAdaptive[0].ja4Signals
+					.map(s => s.signalName)
+					.join(', ')
+			);
 		}
 
 		// Calculate statistics from GraphQL data

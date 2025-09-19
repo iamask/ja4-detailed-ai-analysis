@@ -306,6 +306,130 @@
 			.risk-medium { background: #ffc107; color: #212529; }
 			.risk-high { background: #fd7e14; color: white; }
 			.risk-critical { background: #dc3545; color: white; }
+			
+			/* Structured Security Assessment Styles */
+			.security-assessment {
+				background: white;
+				border-radius: 8px;
+				padding: 25px;
+				box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+			}
+			
+			.assessment-title {
+				font-size: 1.8rem;
+				color: #333;
+				margin-bottom: 20px;
+				padding-bottom: 10px;
+				border-bottom: 2px solid #eee;
+			}
+			
+			.assessment-section {
+				margin-bottom: 25px;
+				padding: 15px;
+				background: #f8f9fa;
+				border-radius: 6px;
+				border-left: 4px solid #667eea;
+			}
+			
+			.section-title {
+				font-size: 1.3rem;
+				margin-bottom: 15px;
+				color: #333;
+				display: flex;
+				align-items: center;
+			}
+			
+			.findings-list, .recommendations-list {
+				margin-left: 20px;
+				margin-bottom: 0;
+			}
+			
+			.findings-list li, .recommendations-list li {
+				margin-bottom: 10px;
+				line-height: 1.5;
+			}
+			
+			.findings-list li:last-child, .recommendations-list li:last-child {
+				margin-bottom: 0;
+			}
+			
+			.ai-fallback-notice {
+				background: #fff3cd;
+				color: #856404;
+				padding: 10px 15px;
+				border-radius: 6px;
+				margin-bottom: 15px;
+				border-left: 4px solid #ffc107;
+				font-size: 0.9rem;
+			}
+			
+			/* Enhanced AI Analysis Styling */
+			.assessment-content {
+				padding: 20px;
+				background: #f8f9fa;
+				border-radius: 8px;
+				line-height: 1.6;
+				box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+				max-width: 100%;
+				overflow-wrap: break-word;
+				word-wrap: break-word;
+			}
+			
+			.assessment-title {
+				font-size: 1.5rem;
+				color: #333;
+				margin-bottom: 15px;
+				padding-bottom: 10px;
+				border-bottom: 2px solid #eee;
+				text-align: center;
+			}
+			
+			.risk-section {
+				background: #f1f8ff;
+				padding: 12px 15px;
+				border-radius: 6px;
+				margin-bottom: 15px;
+				border-left: 4px solid #4a6ee0;
+				font-size: 1.05rem;
+			}
+			
+			.section-header {
+				margin-top: 20px;
+				margin-bottom: 10px;
+				color: #333;
+				font-size: 1.2rem;
+				padding-bottom: 5px;
+				border-bottom: 1px solid #eee;
+			}
+			
+			.assessment-content p {
+				margin-bottom: 15px;
+			}
+			
+			.assessment-content ul {
+				margin-left: 20px;
+				margin-bottom: 20px;
+				list-style-type: disc;
+			}
+			
+			.assessment-content li {
+				margin-bottom: 8px;
+				padding-left: 5px;
+			}
+			
+			.risk-badge-container {
+				margin: 15px 0;
+				text-align: center;
+			}
+			
+			.risk-badge {
+				display: inline-block;
+				padding: 6px 15px;
+				border-radius: 20px;
+				font-weight: bold;
+				letter-spacing: 1px;
+				box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+			}
 
 			.soc-badge {
 				display: inline-block;
@@ -832,11 +956,10 @@
 							<div class="ai-analysis">
 								<h3>
 									<span class="ai-analysis-icon">AI</span>
-									Security Analysis
+									Threat Intelligence
 								</h3>
-								<div>
-									${formatAIAnalysis(data.aiSecurityAnalysis)}
-								</div>
+								${data.aiSecurityAnalysis.isAIFallback ? '<div class="ai-fallback-notice">AI-powered analysis is currently unavailable. Showing automated assessment based on available data.</div>' : ''}
+								${formatAIAnalysis(data.aiSecurityAnalysis)}
 							</div>
 						`;
 					}
@@ -882,53 +1005,164 @@
 			
 			// Helper function to format AI analysis with proper styling
 			function formatAIAnalysis(aiData) {
+				// Check if we have valid data
 				if (!aiData || !aiData.securityAnalysis) {
 					return `<div class="ai-loading">Security analysis not available</div>`;
 				}
 				
-				const analysis = aiData.securityAnalysis;
-				let formattedAnalysis = analysis;
+				// Extract the analysis text from various possible formats
+				let analysisText = extractAnalysisText(aiData.securityAnalysis);
 				
-				// Try to extract risk level and add badge
-				const riskLevels = ['low', 'medium', 'high', 'critical'];
-				let riskLevel = null;
+				// Clean up the analysis text
+				let analysis = cleanupAnalysisText(analysisText);
 				
-				for (const level of riskLevels) {
-					if (analysis.toLowerCase().includes(`risk assessment: ${level}`) || 
-						analysis.toLowerCase().includes(`risk: ${level}`) ||
-						analysis.toLowerCase().includes(`overall risk: ${level}`)) {
-						riskLevel = level;
-						break;
+				// Check if we have any meaningful content
+				if (!analysis || analysis.length < 10) {
+					return `<div class="ai-loading">Security analysis not available. Please try again.</div>`;
+				}
+				
+				// Extract risk level from the analysis
+				const riskLevel = extractRiskLevel(analysis);
+				
+				// Helper function to extract analysis text from various formats
+				function extractAnalysisText(securityAnalysis) {
+					// Handle string format
+					if (typeof securityAnalysis === 'string') {
+						return securityAnalysis;
 					}
-				}
-				
-				// Format with sections and risk badge if found
-				let html = '<div>';
-				
-				if (riskLevel) {
-					html += `<h4>Overall Risk Assessment <span class="risk-badge risk-${riskLevel}">${riskLevel}</span></h4>`;
-				}
-				
-				// Convert analysis text to HTML with proper formatting
-				formattedAnalysis = formattedAnalysis
-					.replace(/\n\n/g, '</p><p>')
-					.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-					.replace(/\*([^*]+)\*/g, '<em>$1</em>')
-					.replace(/^(#+)\s+(.+)$/gm, (match, hashes, title) => {
-						const level = hashes.length + 3; // h4, h5, etc.
-						return `<h${level}>${title}</h${level}>`;
-					})
-					.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>')
-					.replace(/^-\s+(.+)$/gm, '<li>$1</li>');
 					
-				// Wrap lists in ul tags
-				formattedAnalysis = formattedAnalysis.replace(/(<li>.*?<\/li>)+/g, '<ul>$&</ul>');
+					// Handle object format
+					if (typeof securityAnalysis === 'object' && securityAnalysis !== null) {
+						// Check for common response properties
+						if (securityAnalysis.response) return securityAnalysis.response;
+						if (securityAnalysis.text) return securityAnalysis.text;
+						if (securityAnalysis.content) return securityAnalysis.content;
+						
+						// Look for any string property that might contain the analysis
+						const stringProps = Object.entries(securityAnalysis)
+							.filter(([_, value]) => typeof value === 'string' && value.trim().length > 10)
+							.map(([_, value]) => value);
+						
+						if (stringProps.length > 0) {
+							// Use the longest string as it's likely the main content
+							return stringProps.reduce((a, b) => a.length > b.length ? a : b);
+						}
+						
+						// If we can't find a suitable string property
+						return JSON.stringify(securityAnalysis);
+					}
+					
+					return 'Unable to extract security analysis';
+				}
 				
-				html += `<div class="ai-content">${formattedAnalysis}</div>`;
-				html += `<div class="ai-timestamp"><small>Generated: ${new Date(aiData.generatedAt).toLocaleString()}</small></div>`;
-				html += '</div>';
+				// Helper function to clean up the analysis text
+				function cleanupAnalysisText(text) {
+					return String(text)
+						.replace(/^(Assistant:|\[Assistant\]:)\s*/i, '') // Remove assistant prefixes
+						.trim();
+				}
 				
-				return html;
+				// Helper function to extract risk level
+				function extractRiskLevel(text) {
+					const riskLevels = ['low', 'medium', 'high', 'critical'];
+					const patterns = [
+						/risk assessment:?\s*(\w+)/i,
+						/overall risk:?\s*(\w+)/i,
+						/risk level:?\s*(\w+)/i,
+						/risk:?\s*(\w+)/i
+					];
+					
+					// Try each pattern
+					for (const pattern of patterns) {
+						const match = text.match(pattern);
+						if (match && match[1]) {
+							const extractedLevel = match[1].toLowerCase();
+							if (riskLevels.includes(extractedLevel)) {
+								return extractedLevel;
+							}
+						}
+					}
+					
+					return null;
+				}
+				
+				// Convert markdown to HTML with enhanced formatting and a single Security Assessment heading
+				function markdownToHtml(markdown) {
+					// Start with the Security Assessment heading
+					let html = '<h3 class="assessment-title">Security Assessment</h3>';
+					
+					// Clean up the markdown content
+					let cleanMarkdown = markdown
+						// Remove any existing Security Assessment heading
+						.replace(/^(?:#+\s*Security Assessment|Security Assessment)\s*$/im, '')
+						// Remove any markdown section headers (##) that might be in the AI output
+						.replace(/^#+\s+(.+)$/gm, '<strong>$1</strong>')
+						// Clean up extra whitespace
+						.trim();
+					
+					// Process sections with better formatting
+					// 1. Handle risk assessment section
+					let riskSection = '';
+					const riskMatch = cleanMarkdown.match(/(?:overall risk assessment|risk level|risk assessment)[:\s]*([^\n]+)/i);
+					if (riskMatch && riskMatch[1]) {
+						riskSection = `<div class="risk-section"><strong>Risk Assessment:</strong> ${riskMatch[1].trim()}</div>`;
+					}
+					
+					// Process the markdown content with enhanced formatting
+					let content = cleanMarkdown
+						// Handle paragraphs - more carefully to avoid breaking lists
+						.replace(/\n{2,}/g, '</p><p>')
+						
+						// Replace numeric section headers with bold text
+						.replace(/^(\d+)\.(\s+)([A-Z][^\n]+)$/gm, '<p class="section-header"><strong>$1. $3</strong></p>')
+						
+						// Handle bold text
+						.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>')
+						
+						// Handle italic text
+						.replace(/\*([^*]+?)\*/g, '<em>$1</em>')
+						
+						// Handle numbered lists - more robust pattern
+						.replace(/^(\d+)\.\s+(.+)$/gm, '<li>$2</li>')
+						
+						// Handle bullet lists (various bullet characters) - more robust pattern
+						.replace(/^[-*•]\s+(.+)$/gm, '<li>$1</li>');
+					
+					// Wrap lists in ul tags - more carefully
+					content = content.replace(/(?:<li>.*?<\/li>\s*)+/gs, '<ul>$&</ul>');
+					
+					// Handle key findings and recommendations sections better
+					content = content
+						.replace(/(key\s+(?:security\s+)?findings)[:\s]*/i, '<div class="section-header"><strong>Key Findings:</strong></div>')
+						.replace(/(recommendations)[:\s]*/i, '<div class="section-header"><strong>Recommendations:</strong></div>');
+					
+					// Ensure content starts with paragraph tag if it doesn't have a tag
+					if (!content.startsWith('<')) {
+						content = `<p>${content}</p>`;
+					}
+					
+					// Add the risk section first if available
+					if (riskSection) {
+						html += riskSection;
+					}
+					
+					// Add the main content
+					html += content;
+					
+					return html;
+				}
+				
+				// Format the analysis as HTML
+				const formattedHtml = markdownToHtml(analysis);
+				
+				// Build the security assessment HTML with just one heading
+				const assessmentHtml = '<div class="security-assessment">' +
+					`<div class="assessment-content">${formattedHtml}</div>` +
+					(riskLevel ? `<div class="risk-badge-container"><span class="risk-badge risk-${riskLevel}">${riskLevel.toUpperCase()} RISK</span></div>` : '') +
+					`<div class="ai-timestamp"><small>Generated: ${new Date(aiData.generatedAt).toLocaleString()}</small></div>` +
+				'</div>';
+				
+				return assessmentHtml;
 			}
 
 			// Allow Enter key to trigger analysis
