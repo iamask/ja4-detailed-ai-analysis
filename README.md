@@ -20,6 +20,12 @@ A Cloudflare Worker that analyzes JA4 fingerprints using GraphQL API and Workers
 
 ## Quick Start
 
+### Required Variables
+
+- **CLOUDFLARE_ACCOUNT_ID**: Your Cloudflare account ID (found in the Cloudflare dashboard URL)
+- **CLOUDFLARE_API_KEY**: Your Cloudflare API key with Analytics permissions
+[text](https://developers.cloudflare.com/secrets-store/)  
+
 ### Deployment
 
 ```bash
