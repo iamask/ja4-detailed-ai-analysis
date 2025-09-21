@@ -51,6 +51,28 @@ function getDateRanges() {
  * GraphQL Queries for JA4 Analysis
  */
 const QUERIES = {
+	// Bot Score Analysis - Shows bot scores by hour
+	botScoresByHour: `
+		query BotScoresByHour($accountTag: String!, $ja4: String!, $date: String!) {
+			viewer {
+				accounts(filter: { accountTag: $accountTag }) {
+					accountTag
+					httpRequestsAdaptiveGroups(
+						filter: { date: $date, ja4: $ja4 }
+						limit: 288
+						orderBy: [datetimeHour_ASC]
+					) {
+						count
+						dimensions {
+							botScore
+							datetimeHour
+						}
+					}
+				}
+			}
+		}
+	`,
+
 	// WAF Attack Score Analysis - Shows WAF attack scores over time
 	wafAttackScores: `
 		query WafAttackScores($accountTag: String!, $ja4: String!, $date: String!) {
@@ -325,11 +347,9 @@ async function generateAISecurityAnalysis(analysisData, env) {
 		
 		FORMATTING REQUIREMENTS:
 		1. Start with EXACTLY ONE heading "Security Assessment" and nothing else before it
-		2. DO NOT include any other titles or headings like "Threat Intelligence" or "AI Analysis"
-		3. For the risk level, use a single clear statement like "Risk Level: Medium" (not multiple statements)
-		4. Format findings as a bulleted list with each item starting with "- " (not "include:" or other prefixes)
-		5. Format recommendations as a bulleted list with each item starting with "- " (not "include:" or other prefixes)
-		6. Keep your entire response clean, concise and well-structured
+		2. For the risk level, list the risk level as "Low", "Medium", "High", "Very High", or "Extreme"
+		3. Format recommendations as a bulletbed list with each item starting with "- " (not "include:" or other prefixes)
+		4. Keep your entire response clean, concise and well-structured
 		
 		When analyzing JA4 fingerprints, consider these metrics and their meanings:
 		- h2h3_ratio_1h: Ratio of HTTP/2 and HTTP/3 requests to total requests. Higher values indicate more modern protocols.
@@ -341,7 +361,11 @@ async function generateAISecurityAnalysis(analysisData, env) {
 		- reqs_rank_1h: Rank based on request count. Lower values indicate higher request volumes.
 		- cache_ratio_1h: Ratio of cacheable responses. Higher values suggest normal web browsing behavior.
 		- ips_rank_1h: Rank based on unique client IPs. Lower values indicate traffic from many different IPs.
-		- ips_quantile_1h: Quantile position based on unique client IPs. Higher values mean more unique IPs than most fingerprints.`;
+		- ips_quantile_1h: Quantile position based on unique client IPs. Higher values mean more unique IPs than most fingerprints.
+		
+		IMPORTANT SECURITY INDICATORS:
+		- Lower attack scores combined with more WAF Rules Triggered strongly indicates malicious bot activity. This pattern shows bots trying to avoid detection while still triggering security rules.
+		- Multiple WAF rule triggers across different categories (e.g., SQL injection, XSS, and path traversal) from the same JA4 fingerprint is a strong indicator of automated scanning tools or malicious bots.`;
 		
 		// Create a clean, structured user prompt with the data
 		const userPrompt = `Analyze the following JA4 fingerprint data and provide a security assessment.
@@ -366,9 +390,11 @@ async function generateAISecurityAnalysis(analysisData, env) {
 		
 		## Security Signals
 		${JSON.stringify(signals, null, 2)}
+		${signals.attack_score_1h !== undefined ? `Note: Lower attack scores combined with WAF rule triggers often indicate sophisticated bots trying to evade detection.` : ''}
 		
-		## WAF Rules Triggered
+		## WAF Rules Triggered (Important: More rules triggered often indicates malicious activity)
 		${JSON.stringify(wafRules, null, 2)}
+		${wafRules.length > 0 ? `Note: This fingerprint triggered ${wafRules.length} different WAF rules, which may indicate scanning or attack attempts.` : 'No WAF rules were triggered by this fingerprint.'}
 		
 		## Traffic Patterns
 		- Top IPs: ${JSON.stringify(topIPs)}
@@ -410,9 +436,21 @@ async function generateAISecurityAnalysis(analysisData, env) {
 			
 		} catch (error) {
 			console.error('AI model error:', error);
-			// Provide a fallback analysis based on the data we have
+			// Log detailed error information for debugging
+			const errorDetails = {
+				message: error.message || 'Unknown error',
+				stack: error.stack,
+				time: new Date().toISOString(),
+				ja4: ja4,
+				totalRequests: totalRequests
+			};
+			console.error('AI processing error details:', JSON.stringify(errorDetails));
+			
+			// Provide a fallback analysis with error information
 			return {
 				securityAnalysis: generateFallbackAnalysis(ja4, totalRequests, uniqueIPs, wafRules),
+				error: `AI processing error: ${error.message || 'Unknown error'}`,
+				errorTime: new Date().toISOString(),
 				generatedAt: new Date().toISOString(),
 				isAIFallback: true
 			};
@@ -479,9 +517,24 @@ async function generateAISecurityAnalysis(analysisData, env) {
 		};
 	} catch (error) {
 		console.error('Error generating AI security analysis:', error);
+		
+		// Log detailed error information for troubleshooting
+		const errorContext = {
+			type: 'GeneralAIProcessingError',
+			message: error.message || 'Unknown error',
+			stack: error.stack,
+			time: new Date().toISOString(),
+			ja4: ja4,
+			totalRequests: totalRequests,
+			uniqueIPs: uniqueIPs,
+			wafRulesCount: wafRules ? wafRules.length : 0
+		};
+		console.error('AI analysis failed with context:', JSON.stringify(errorContext));
+		
 		return {
 			securityAnalysis: generateFallbackAnalysis(ja4, totalRequests, uniqueIPs, wafRules),
-			error: error.message,
+			error: `Unable to process JA4 fingerprint analysis: ${error.message || 'Unknown error'}`,
+			errorDetails: errorContext,
 			generatedAt: new Date().toISOString(),
 			isAIFallback: true
 		};
@@ -492,32 +545,9 @@ async function generateAISecurityAnalysis(analysisData, env) {
  * Generate a fallback security analysis when AI model fails
  */
 function generateFallbackAnalysis(ja4, totalRequests, uniqueIPs, wafRules) {
-	// Determine risk level based on available data
-	let riskLevel = 'low';
-	if (wafRules && wafRules.length > 0) {
-		riskLevel = 'medium';
-	}
-	
-	// Create a structured analysis with a single heading and consistent format
-	return `
-		Security Assessment
-
-		Risk Level: ${riskLevel.toUpperCase()}
-		
-		Based on the available data for JA4 fingerprint ${ja4}, a preliminary risk assessment has been generated. This fingerprint has generated ${totalRequests || 0} requests from ${uniqueIPs || 0} unique IP addresses. ${wafRules && wafRules.length > 0 ? `There are ${wafRules.length} WAF rules triggered by this fingerprint, which may indicate suspicious activity.` : 'No WAF rules were triggered by this fingerprint.'}
-
-		Key Findings:
-		- JA4 fingerprint analysis shows ${totalRequests || 0} total requests in the analyzed time period
-		- Traffic originated from ${uniqueIPs || 0} unique IP addresses
-		${wafRules && wafRules.length > 0 ? `- WAF rules were triggered ${wafRules.length} times, suggesting potential security concerns` : '- No WAF rules were triggered, suggesting normal traffic patterns'}
-		- Limited data is available for a comprehensive analysis
-
-		Recommendations:
-		- Continue monitoring this JA4 fingerprint for changes in behavior
-		- Implement additional logging to gather more context about this traffic
-		- Consider rate limiting if traffic volume increases significantly
-	`;
-}
+	// Create a generic error message when AI processing fails
+	return `The JA4 fingerprint analysis could not be completed. This may be due to a temporary issue with the AI processing system. Please try again later and Check the Workers logs for more information`;
+}	
 
 /**
  * Fetch all JA4 analysis data from GraphQL API
@@ -535,6 +565,7 @@ async function fetchJA4Data(ja4, accountTag, apiToken) {
 		{ name: 'asnData', query: QUERIES.asnAnalysis },
 		{ name: 'ipData', query: QUERIES.ipAnalysis },
 		{ name: 'wafScores', query: QUERIES.wafAttackScores },
+		{ name: 'botScores', query: QUERIES.botScoresByHour },
 		{ name: 'ja4Signals', query: QUERIES.ja4Signals },
 		{ name: 'wafRulesTriggered', query: QUERIES.wafRulesTriggered },
 		{ name: 'dailyActivity', query: QUERIES.dailyActivity },
@@ -623,6 +654,25 @@ async function handleAnalysis(request, env, ctx) {
 
 		console.log('GraphQL data fetched, preparing response...');
 
+		// Check if we have any data for this JA4 fingerprint
+		const hasJa4Data = !!analysisData.ja4Signals?.viewer?.accounts?.[0]?.httpRequestsAdaptive?.[0];
+		
+		// If no data found for this JA4 fingerprint, return an error response
+		if (!hasJa4Data) {
+			console.log('No JA4 fingerprint data found for:', targetJA4);
+			return new Response(JSON.stringify({
+				error: 'Not Found',
+				message: `No data found for JA4 fingerprint: ${targetJA4}. This fingerprint may not exist in your account's traffic or may be too recent.`,
+				timestamp: new Date().toISOString()
+			}), {
+				status: 404,
+				headers: { 
+					'Content-Type': 'application/json',
+					'Access-Control-Allow-Origin': '*'
+				}
+			});
+		}
+		
 		// Structure JA4 signals from GraphQL data
 		const ja4SignalsData = {};
 		
@@ -681,6 +731,20 @@ async function handleAnalysis(request, env, ctx) {
 		}
 
 		// Format the response with clean structure
+		// Process bot scores by hour
+		const hourlyBotScores = [];
+		if (analysisData.botScores?.viewer?.accounts?.[0]?.httpRequestsAdaptiveGroups) {
+			analysisData.botScores.viewer.accounts[0].httpRequestsAdaptiveGroups.forEach(item => {
+				if (item.dimensions.botScore !== undefined && item.dimensions.datetimeHour) {
+					hourlyBotScores.push({
+						hour: item.dimensions.datetimeHour,
+						botScore: item.dimensions.botScore,
+						count: item.count
+					});
+				}
+			});
+		}
+
 		const response = {
 			analysis: {
 				targetJA4,
@@ -696,6 +760,7 @@ async function handleAnalysis(request, env, ctx) {
 					signals: ja4SignalsData
 				}],
 				trafficBreakdown: {
+					hourlyBotScores: hourlyBotScores || [],
 					statusCodeDistribution: analysisData.statusCodeAnalysis?.viewer?.accounts?.[0]?.httpRequestsAdaptiveGroups
 						?.map(d => ({
 							datetimeHour: d.dimensions.datetimeHour,

@@ -100,8 +100,12 @@
 			.loading {
 				display: none;
 				text-align: center;
-				padding: 20px;
+				padding: 30px;
 				color: #667eea;
+				background: #f8f9fa;
+				border-radius: 8px;
+				box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+				margin-bottom: 20px;
 			}
 
 			.spinner {
@@ -112,6 +116,19 @@
 				height: 30px;
 				animation: spin 1s linear infinite;
 				margin: 0 auto 10px;
+			}
+			
+			/* Button spinner - smaller and inline */
+			.btn-spinner {
+				display: inline-block;
+				border: 2px solid rgba(255,255,255,0.3);
+				border-top: 2px solid #ffffff;
+				border-radius: 50%;
+				width: 16px;
+				height: 16px;
+				animation: spin 1s linear infinite;
+				margin-right: 8px;
+				vertical-align: middle;
 			}
 
 			@keyframes spin {
@@ -365,14 +382,16 @@
 			
 			/* Enhanced AI Analysis Styling */
 			.assessment-content {
-				padding: 20px;
+				padding: 25px;
 				background: #f8f9fa;
 				border-radius: 8px;
-				line-height: 1.6;
+				line-height: 1.7;
 				box-shadow: 0 2px 5px rgba(0,0,0,0.05);
 				max-width: 100%;
 				overflow-wrap: break-word;
 				word-wrap: break-word;
+				font-size: 1.05rem;
+				color: #333;
 			}
 			
 			.assessment-title {
@@ -400,6 +419,30 @@
 				font-size: 1.2rem;
 				padding-bottom: 5px;
 				border-bottom: 1px solid #eee;
+			}
+			
+			.ai-timestamp {
+				text-align: right;
+				color: #666;
+				font-size: 0.8rem;
+				margin-top: 15px;
+			}
+			
+			.error-container {
+				background-color: #fff9f9;
+				border-left: 4px solid #e74c3c;
+				padding: 20px;
+				border-radius: 4px;
+				margin: 20px 0;
+			}
+			
+			.error-container h3 {
+				color: #e74c3c;
+				margin-top: 0;
+			}
+			
+			.error-container ul {
+				margin-left: 20px;
 			}
 			
 			.assessment-content p {
@@ -449,8 +492,15 @@
 				color: #721c24;
 				padding: 15px;
 				border-radius: 8px;
-				margin-top: 20px;
+				margin: 20px 0;
 				border-left: 4px solid #dc3545;
+				font-weight: 500;
+				animation: fadeIn 0.3s ease-in-out;
+			}
+			
+			@keyframes fadeIn {
+				from { opacity: 0; transform: translateY(-10px); }
+				to { opacity: 1; transform: translateY(0); }
 			}
 
 			@media (max-width: 768px) {
@@ -508,51 +558,95 @@
 			const resultsContent = document.getElementById('results-content');
 			const errorDiv = document.getElementById('error');
 
-			analyzeBtn.addEventListener('click', async () => {
-				const ja4 = ja4Input.value.trim();
+			// Validate JA4 fingerprint format
+			function validateJA4(ja4) {
+				// JA4 format validation: typically has format like t13d1516h2_8daaf6152771_e5627efa2ab1
+				// Should have 2 underscores and alphanumeric segments
+				const ja4Regex = /^[a-zA-Z0-9]+_[a-zA-Z0-9]+_[a-zA-Z0-9]+$/;
+				return ja4Regex.test(ja4);
+			}
+			
+			// Handle form submission
+			async function analyzeJA4() {
+				const ja4Value = ja4Input.value.trim();
+				if (!ja4Value) {
+					showError('Please enter a JA4 fingerprint');
+					return;
+				}
 				
-				// Validate JA4 input
-				if (!ja4) {
-					errorDiv.textContent = 'Error: Please enter a JA4 fingerprint';
-					errorDiv.style.display = 'block';
-					ja4Input.focus();
+				// Basic validation
+				if (!validateJA4(ja4Value)) {
+					showError('Invalid JA4 fingerprint format. Please check and try again.');
 					return;
 				}
 				
 				// Show loading state
 				analyzeBtn.disabled = true;
-				loading.style.display = 'block';
-				results.style.display = 'none';
-				errorDiv.style.display = 'none';
-
+				analyzeBtn.innerHTML = '<span class="btn-spinner"></span> Analyzing...';
+				results.style.display = 'none'; // Hide previous results
+				loading.style.display = 'block'; // Show loading indicator
+				errorDiv.style.display = 'none'; // Hide any previous errors
+				
 				try {
-					const requestBody = { ja4 };
-					
 					const response = await fetch('/api/analyze', {
 						method: 'POST',
 						headers: {
 							'Content-Type': 'application/json'
 						},
-						body: JSON.stringify(requestBody)
+						body: JSON.stringify({ ja4: ja4Value })
 					});
-
-					const data = await response.json();
-
+					
 					if (!response.ok) {
-						throw new Error(data.message || 'Analysis failed');
+						const errorData = await response.json();
+						
+						// Special handling for 404 (JA4 not found)
+						if (response.status === 404) {
+							resultsContent.innerHTML = `
+								<div class="error-container">
+									<h3>JA4 Fingerprint Not Found</h3>
+									<p>${errorData.message || 'No data found for this JA4 fingerprint.'}</p>
+									<p>This could be because:</p>
+									<ul>
+										<li>This fingerprint hasn't been seen in your account's traffic</li>
+										<li>The fingerprint is too recent and hasn't been indexed yet</li>
+										<li>The fingerprint format is incorrect</li>
+									</ul>
+									<p>Try checking the format and trying again later, or try a different JA4 fingerprint.</p>
+								</div>
+							`;
+						} else {
+							showError(`Error: ${errorData.message || 'Failed to analyze JA4 fingerprint'}`);
+						}
+						return;
 					}
 
+					const data = await response.json();
 					displayResults(data);
 				} catch (error) {
-					errorDiv.textContent = `Error: ${error.message}`;
-					errorDiv.style.display = 'block';
+					showError(`Error: ${error.message}`);
 				} finally {
 					// Hide loading state
 					analyzeBtn.disabled = false;
+					analyzeBtn.innerHTML = 'Analyze';
 					loading.style.display = 'none';
 				}
-			});
+			}
 
+			// Function to lazily render tables for better performance
+			function lazyRender(element, renderFunction) {
+				// Use IntersectionObserver to render tables only when they come into view
+				const observer = new IntersectionObserver((entries) => {
+					entries.forEach(entry => {
+						if (entry.isIntersecting) {
+							renderFunction();
+							observer.disconnect(); // Only render once
+						}
+					});
+				}, { threshold: 0.1 });
+				
+				observer.observe(element);
+			}
+			
 			function displayResults(data) {
 				if (data.message) {
 					errorDiv.textContent = data.message;
@@ -563,20 +657,45 @@
 				const analysis = data.analysis;
 				let html = '';
 
-				// Main stats overview
+				// Helper function to format large numbers
+				function formatNumber(num) {
+					if (num === undefined || num === null) return '0';
+					if (typeof num === 'string') num = parseFloat(num);
+					
+					// Format with commas for thousands
+					return num.toLocaleString();
+				}
+				
+				// Calculate average bot score if hourly data is available
+				let avgBotScore = analysis.avgBotScore || '0';
+				if (analysis.trafficBreakdown?.hourlyBotScores && analysis.trafficBreakdown.hourlyBotScores.length > 0) {
+					let totalBotScore = 0;
+					let totalRequests = 0;
+					
+					analysis.trafficBreakdown.hourlyBotScores.forEach(item => {
+						totalBotScore += (item.botScore * item.count);
+						totalRequests += item.count;
+					});
+					
+					if (totalRequests > 0) {
+						avgBotScore = (totalBotScore / totalRequests).toFixed(2);
+					}
+				}
+				
+				// Main stats overview with all three stats
 				html += `
 					<div class="stats-grid">
 						<div class="stat-item">
-							<div class="stat-value">${analysis.totalRequests || 0}</div>
+							<div class="stat-value">${formatNumber(analysis.totalRequests)}</div>
 							<div class="stat-label">Total Requests</div>
 						</div>
 						<div class="stat-item">
-							<div class="stat-value">${analysis.uniqueIPs || 0}</div>
+							<div class="stat-value">${formatNumber(analysis.uniqueIPs)}</div>
 							<div class="stat-label">Unique IPs</div>
 						</div>
 						<div class="stat-item">
-							<div class="stat-value">${analysis.avgBotScore || 0}</div>
-							<div class="stat-label">Avg Bot Score</div>
+							<div class="stat-value">${avgBotScore}</div>
+							<div class="stat-label">Average Bot Score</div>
 						</div>
 					</div>
 				`;
@@ -588,6 +707,86 @@
 						<div class="fingerprint-card">
 							<h3>JA4 Fingerprint</h3>
 							<div class="fingerprint-hash">${fp.ja4}</div>
+						</div>
+					`;
+				}
+				
+				// We now display the average bot score in the main stats grid
+				
+				// Display JA4 Signals in table format
+				if (analysis.ja4Signals && Object.keys(analysis.ja4Signals).length > 0) {
+					html += `
+						<div class="table-container">
+							<h3 class="table-title">JA4 Signals Analysis</h3>
+							<table class="data-table">
+								<thead>
+									<tr>
+										<th>Signal Name</th>
+										<th>Value</th>
+										<th>Description</th>
+									</tr>
+								</thead>
+								<tbody>
+									${getSignalRows(analysis.ja4Signals)}
+								</tbody>
+							</table>
+						</div>
+					`;
+				}
+				
+				// Display Bot Score Analysis
+				if (analysis.trafficBreakdown?.hourlyBotScores && analysis.trafficBreakdown.hourlyBotScores.length > 0) {
+					
+					html += `
+						<div class="table-container">
+							<h3 class="table-title">Hourly Bot Score Analysis</h3>
+							<table class="data-table">
+								<thead>
+									<tr>
+										<th>Time (UTC)</th>
+										<th>Bot Score</th>
+										<th>Request Count</th>
+									</tr>
+								</thead>
+								<tbody>
+									${analysis.trafficBreakdown.hourlyBotScores.map(item => {
+										const date = new Date(item.hour);
+										const formattedTime = date.toLocaleDateString('en-US', { 
+											month: 'short', 
+											day: 'numeric',
+											hour: '2-digit',
+											minute: '2-digit',
+											timeZone: 'UTC'
+										});
+										
+										// Helper function to classify bot score
+										let botClass = '';
+										let botColor = '';
+										
+										if (item.botScore <= 1) {
+											botClass = 'Automated Bot';
+											botColor = '#dc3545';
+										} else if (item.botScore <= 5) {
+											botClass = 'Likely Bot';
+											botColor = '#fd7e14';
+										} else if (item.botScore <= 10) {
+											botClass = 'Possibly Human';
+											botColor = '#ffc107';
+										} else {
+											botClass = 'Likely Human';
+											botColor = '#28a745';
+										}
+										
+										return `
+											<tr>
+												<td><strong>${formattedTime}</strong></td>
+												<td><span style="color: ${botColor}; font-weight: bold;">${item.botScore}</span></td>
+												<td><span class="count-badge">${item.count.toLocaleString()}</span></td>
+											</tr>
+										`;
+									}).join('')}
+								</tbody>
+							</table>
 						</div>
 					`;
 				}
@@ -628,26 +827,7 @@
 					`;
 				}
 
-				// Display JA4 Signals in table format
-				if (analysis.ja4Signals && Object.keys(analysis.ja4Signals).length > 0) {
-					html += `
-						<div class="table-container">
-							<h3 class="table-title">JA4 Signals Analysis</h3>
-							<table class="data-table">
-								<thead>
-									<tr>
-										<th>Signal Name</th>
-										<th>Value</th>
-										<th>Description</th>
-									</tr>
-								</thead>
-								<tbody>
-									${getSignalRows(analysis.ja4Signals)}
-								</tbody>
-							</table>
-						</div>
-					`;
-				}
+				// JA4 Signals Analysis has been moved above Hourly Bot Score Analysis
 
 				// Display traffic breakdown in tables
 				if (analysis.trafficBreakdown) {
@@ -773,6 +953,34 @@
 							</div>
 						`;
 					}
+					
+					// User agents table
+					if (breakdown.topUserAgents && breakdown.topUserAgents.length > 0) {
+						html += `
+							<div class="table-container">
+								<h3 class="table-title">Top User Agents</h3>
+								<table class="data-table">
+									<thead>
+										<tr>
+											<th>User Agent</th>
+											<th>Request Count</th>
+										</tr>
+									</thead>
+									<tbody>
+										${breakdown.topUserAgents.map(item => {
+											const truncatedUA = item.userAgent.length > 100 ? item.userAgent.substring(0, 100) + '...' : item.userAgent;
+											return `
+												<tr>
+													<td style="word-break: break-all;">${truncatedUA}</td>
+													<td><span class="count-badge">${item.count}</span></td>
+												</tr>
+											`;
+										}).join('')}
+									</tbody>
+								</table>
+							</div>
+						`;
+					}
 
 					// ASN distribution table
 					if (breakdown.asnDistribution && breakdown.asnDistribution.length > 0) {
@@ -792,6 +1000,33 @@
 											<tr>
 												<td>AS${item.asn}</td>
 												<td>${item.asnDescription || 'Unknown'}</td>
+												<td><span class="count-badge">${item.count}</span></td>
+											</tr>
+										`).join('')}
+									</tbody>
+								</table>
+							</div>
+						`;
+					}
+					
+					// Top IP addresses table
+					if (breakdown.topIPs && breakdown.topIPs.length > 0) {
+						html += `
+							<div class="table-container">
+								<h3 class="table-title">Top IP Addresses</h3>
+								<table class="data-table">
+									<thead>
+										<tr>
+											<th>IP Address</th>
+											<th>Country</th>
+											<th>Request Count</th>
+										</tr>
+									</thead>
+									<tbody>
+										${breakdown.topIPs.map(item => `
+											<tr>
+												<td><code>${item.ip}</code></td>
+												<td>${item.country}</td>
 												<td><span class="count-badge">${item.count}</span></td>
 											</tr>
 										`).join('')}
@@ -895,75 +1130,23 @@
 						`;
 					}
 
-					// Top IP addresses table
-					if (breakdown.topIPs && breakdown.topIPs.length > 0) {
-						html += `
-							<div class="table-container">
-								<h3 class="table-title">Top IP Addresses</h3>
-								<table class="data-table">
-									<thead>
-										<tr>
-											<th>IP Address</th>
-											<th>Country</th>
-											<th>Request Count</th>
-										</tr>
-									</thead>
-									<tbody>
-										${breakdown.topIPs.map(item => `
-											<tr>
-												<td><code>${item.ip}</code></td>
-												<td>${item.country}</td>
-												<td><span class="count-badge">${item.count}</span></td>
-											</tr>
-										`).join('')}
-									</tbody>
-								</table>
-							</div>
-						`;
-					}
-
-					// User agents table
-					if (breakdown.topUserAgents && breakdown.topUserAgents.length > 0) {
-						html += `
-							<div class="table-container">
-								<h3 class="table-title">Top User Agents</h3>
-								<table class="data-table">
-									<thead>
-										<tr>
-											<th>User Agent</th>
-											<th>Request Count</th>
-										</tr>
-									</thead>
-									<tbody>
-										${breakdown.topUserAgents.map(item => {
-											const truncatedUA = item.userAgent.length > 100 ? item.userAgent.substring(0, 100) + '...' : item.userAgent;
-											return `
-												<tr>
-													<td style="word-break: break-all;">${truncatedUA}</td>
-													<td><span class="count-badge">${item.count}</span></td>
-												</tr>
-											`;
-										}).join('')}
-									</tbody>
-								</table>
-							</div>
-						`;
-					}
+					// User agents table has been moved above ASN Distribution
 					
 					// AI Security Analysis Section
 					if (data.aiSecurityAnalysis) {
+						const aiData = data.aiSecurityAnalysis;
 						html += `
 							<div class="ai-analysis">
-								<h3>
-									<span class="ai-analysis-icon">AI</span>
-									Threat Intelligence
-								</h3>
-								${data.aiSecurityAnalysis.isAIFallback ? '<div class="ai-fallback-notice">AI-powered analysis is currently unavailable. Showing automated assessment based on available data.</div>' : ''}
+								${aiData.isAIFallback ? `
+									<div class="ai-fallback-notice">
+										<strong>Note:</strong> Analysis is not available. ${aiData.error ? aiData.error : 'Please check the Workers logs for more information.'}
+									</div>
+								` : ''}
 								${formatAIAnalysis(data.aiSecurityAnalysis)}
 							</div>
 						`;
 					}
-				}
+				} // Close the data.trafficBreakdown block
 
 				if (!html) {
 					html = `
@@ -1165,6 +1348,28 @@
 				return assessmentHtml;
 			}
 
+			// Function to show error messages
+			function showError(message) {
+				errorDiv.textContent = message;
+				errorDiv.style.display = 'block';
+				setTimeout(() => {
+					errorDiv.style.display = 'none';
+				}, 5000); // Hide error after 5 seconds
+			}
+			
+			// Debounce function to prevent multiple rapid clicks
+			function debounce(func, wait) {
+				let timeout;
+				return function(...args) {
+					const context = this;
+					clearTimeout(timeout);
+					timeout = setTimeout(() => func.apply(context, args), wait);
+				};
+			}
+			
+			// Add click handler for the analyze button with debounce
+			analyzeBtn.addEventListener('click', debounce(analyzeJA4, 300));
+			
 			// Allow Enter key to trigger analysis
 			ja4Input.addEventListener('keypress', (e) => {
 				if (e.key === 'Enter') {
