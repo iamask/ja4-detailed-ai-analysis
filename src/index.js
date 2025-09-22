@@ -34,12 +34,24 @@ async function executeGraphQLQuery(query, variables, apiToken) {
 function getDateRanges() {
 	const now = new Date();
 	const today = now.toISOString().split('T')[0]; // YYYY-MM-DD format for GraphQL date filters
+	
+	// Create formatted date string in the format "YYYY-MM-DDT00:00:00Z"
+	const todayFormatted = `${today}T00:00:00Z`;
+	
+	// Create rolling 60-minute window (current time to one hour ago)
+	// Format as full ISO strings for DateTime type parameters
+	const currentTime = now.toISOString(); // Current time in ISO format
+	const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString(); // One hour ago in ISO format
+	
 	const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000); // For real-time data queries
 	const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); // Weekly analysis window
 	const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); // Monthly trend analysis
 	
 	return {
 		today,
+		todayFormatted, // YYYY-MM-DDT00:00:00Z format
+		currentTime,    // Current time in ISO format
+		oneHourAgo,     // One hour ago in ISO format
 		tenMinutesAgo: tenMinutesAgo.toISOString(),
 		sevenDaysAgo: sevenDaysAgo.toISOString().split('T')[0], // Date only for daily aggregation
 		thirtyDaysAgo: thirtyDaysAgo.toISOString().split('T')[0], // Date only for daily aggregation
@@ -59,7 +71,7 @@ const QUERIES = {
 					accountTag
 					httpRequestsAdaptiveGroups(
 						filter: { date: $date, ja4: $ja4 }
-						limit: 288
+						limit: 1000
 						orderBy: [datetimeHour_ASC]
 					) {
 						count
@@ -81,13 +93,12 @@ const QUERIES = {
 					accountTag
 					httpRequestsAdaptiveGroups(
 						filter: { date: $date, ja4: $ja4 }
-						limit: 288
 						orderBy: [datetimeHour_ASC]
+						limit: 1000
 					) {
 						count
 						dimensions {
 							wafAttackScore
-							wafAttackScoreClass
 							wafRceAttackScore
 							wafSqliAttackScore
 							wafXssAttackScore
@@ -217,7 +228,8 @@ const QUERIES = {
 					accountTag
 					httpRequestsAdaptiveGroups(
 						filter: { date: $date, ja4: $ja4 }
-						limit: 100
+						orderBy: [datetimeHour_ASC]
+						limit: 1000
 					) {
 						count
 						dimensions {
@@ -230,14 +242,18 @@ const QUERIES = {
 		}
 	`,
 
-	// JA4 Signals Intelligence - Advanced behavioral signals for this fingerprint
+	// JA4 Signals Intelligence - Advanced behavioral signals for this fingerprint (rolling 60 minutes)
 	ja4Signals: `
-		query JA4Signals($accountTag: String!, $ja4: String!, $date: String!) {
+		query JA4Signals($accountTag: String!, $ja4: String!, $from: DateTime!, $to: DateTime!) {
 			viewer {
 				accounts(filter: { accountTag: $accountTag }) {
 					accountTag
 					httpRequestsAdaptive(
-						filter: { date: $date, ja4: $ja4 }
+						filter: { 
+							ja4: $ja4,
+							datetime_geq: $from,
+							datetime_lt: $to
+						}
 						limit: 1
 					) {
 						ja4Signals {
@@ -571,11 +587,24 @@ async function fetchJA4Data(ja4, accountTag, apiToken) {
 		{ name: 'dailyActivity', query: QUERIES.dailyActivity },
 	].map(async ({ name, query }) => {
 		try {
-			// Use different parameters for queries that need a date range
-			const needsRange = name === 'dailyActivity' || name === 'hostnames';
-			const queryParams = needsRange
-				? { accountTag, ja4, dateGte: dates.thirtyDaysAgo, dateLte: dates.today }
-				: { accountTag, ja4, date: dates.today };
+			// Use different parameters for different query types
+			let queryParams;
+			
+			if (name === 'dailyActivity' || name === 'hostnames') {
+				// Queries that need a date range
+				queryParams = { accountTag, ja4, dateGte: dates.thirtyDaysAgo, dateLte: dates.today };
+			} else if (name === 'ja4Signals') {
+				// JA4Signals query uses a rolling 60-minute window (current time to one hour ago)
+				queryParams = { 
+					accountTag, 
+					ja4, 
+					from: dates.oneHourAgo, 
+					to: dates.currentTime 
+				};
+			} else {
+				// Standard queries with a single date
+				queryParams = { accountTag, ja4, date: dates.today };
+			}
 			
 			const response = await executeGraphQLQuery(
 				query,
@@ -731,18 +760,57 @@ async function handleAnalysis(request, env, ctx) {
 		}
 
 		// Format the response with clean structure
-		// Process bot scores by hour
+		// Process bot scores by hour and calculate hourly averages
 		const hourlyBotScores = [];
 		if (analysisData.botScores?.viewer?.accounts?.[0]?.httpRequestsAdaptiveGroups) {
+			// Group scores by hour
+			const scoresByHour = {};
+			
+			// Process each data point
 			analysisData.botScores.viewer.accounts[0].httpRequestsAdaptiveGroups.forEach(item => {
 				if (item.dimensions.botScore !== undefined && item.dimensions.datetimeHour) {
-					hourlyBotScores.push({
-						hour: item.dimensions.datetimeHour,
-						botScore: item.dimensions.botScore,
+					const hour = item.dimensions.datetimeHour;
+					const hourKey = hour.split('T')[0] + 'T' + hour.split('T')[1].substring(0, 2) + ':00:00Z';
+					
+					if (!scoresByHour[hourKey]) {
+						scoresByHour[hourKey] = {
+							scores: [],
+							totalCount: 0
+						};
+					}
+					
+					// Add weighted scores (each score is weighted by its request count)
+					scoresByHour[hourKey].scores.push({
+						score: item.dimensions.botScore,
 						count: item.count
 					});
+					scoresByHour[hourKey].totalCount += item.count;
 				}
 			});
+			
+			// Calculate weighted average for each hour
+			Object.keys(scoresByHour).forEach(hour => {
+				const hourData = scoresByHour[hour];
+				
+				// Calculate weighted average
+				let weightedSum = 0;
+				hourData.scores.forEach(item => {
+					weightedSum += (item.score * item.count);
+				});
+				
+				const avgScore = hourData.totalCount > 0 ? 
+					Math.round((weightedSum / hourData.totalCount) * 100) / 100 : 0;
+				
+				hourlyBotScores.push({
+					hour,
+					botScore: avgScore,
+					count: hourData.totalCount,
+					dataPoints: hourData.scores.length // Number of data points averaged
+				});
+			});
+			
+			// Sort by hour
+			hourlyBotScores.sort((a, b) => new Date(a.hour) - new Date(b.hour));
 		}
 
 		const response = {
@@ -805,16 +873,92 @@ async function handleAnalysis(request, env, ctx) {
 							source: rule.source,
 							count: rule.count
 						})) || [],
-					wafAttackScores: analysisData.wafScores?.viewer?.accounts?.[0]?.httpRequestsAdaptiveGroups
-						?.map(item => ({
-							hour: item.dimensions.datetimeHour,
-							overallScore: item.dimensions.wafAttackScore || 0,
-							scoreClass: item.dimensions.wafAttackScoreClass || 'none',
-							rceScore: item.dimensions.wafRceAttackScore || 0,
-							sqliScore: item.dimensions.wafSqliAttackScore || 0,
-							xssScore: item.dimensions.wafXssAttackScore || 0,
-							count: item.count
-						})) || [],
+					wafAttackScores: (() => {
+						// Get raw data from API
+						const rawScores = analysisData.wafScores?.viewer?.accounts?.[0]?.httpRequestsAdaptiveGroups || [];
+						
+						// Group scores by hour
+						const scoresByHour = {};
+						
+						// Process each data point
+						rawScores.forEach(item => {
+							const hour = item.dimensions.datetimeHour;
+							const hourKey = hour.split('T')[0] + 'T' + hour.split('T')[1].substring(0, 2) + ':00:00Z';
+							const count = item.count || 1; // Use request count for weighting, default to 1 if not available
+							
+							if (!scoresByHour[hourKey]) {
+								scoresByHour[hourKey] = {
+									overallScores: [],
+									rceScores: [],
+									sqliScores: [],
+									xssScores: [],
+									totalCount: 0,
+									dataPoints: 0
+								};
+							}
+							
+							// Add scores with their weights (request count)
+							if (item.dimensions.wafAttackScore !== undefined) {
+								scoresByHour[hourKey].overallScores.push({
+									score: item.dimensions.wafAttackScore,
+									count: count
+								});
+							}
+							if (item.dimensions.wafRceAttackScore !== undefined) {
+								scoresByHour[hourKey].rceScores.push({
+									score: item.dimensions.wafRceAttackScore,
+									count: count
+								});
+							}
+							if (item.dimensions.wafSqliAttackScore !== undefined) {
+								scoresByHour[hourKey].sqliScores.push({
+									score: item.dimensions.wafSqliAttackScore,
+									count: count
+								});
+							}
+							if (item.dimensions.wafXssAttackScore !== undefined) {
+								scoresByHour[hourKey].xssScores.push({
+									score: item.dimensions.wafXssAttackScore,
+									count: count
+								});
+							}
+							
+							// Update total count and data points
+							scoresByHour[hourKey].totalCount += count;
+							scoresByHour[hourKey].dataPoints += 1;
+						});
+						
+						// Calculate weighted averages for each hour
+						return Object.keys(scoresByHour).map(hour => {
+							const hourData = scoresByHour[hour];
+							
+							// Helper function to calculate weighted average
+							const calculateWeightedAverage = scoreArray => {
+								if (!scoreArray || scoreArray.length === 0) return 0;
+								
+								let weightedSum = 0;
+								let totalWeight = 0;
+								
+								scoreArray.forEach(item => {
+									weightedSum += (item.score * item.count);
+									totalWeight += item.count;
+								});
+								
+								return totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;
+							};
+							
+							return {
+								hour,
+								overallScore: calculateWeightedAverage(hourData.overallScores),
+								rceScore: calculateWeightedAverage(hourData.rceScores),
+								sqliScore: calculateWeightedAverage(hourData.sqliScores),
+								xssScore: calculateWeightedAverage(hourData.xssScores),
+								// Add count information
+								dataPoints: hourData.dataPoints,
+								totalRequests: hourData.totalCount
+							};
+						});
+					})() || [],
 					dailyActivity: analysisData.dailyActivity?.viewer?.accounts?.[0]?.httpRequestsAdaptiveGroups
 						?.map(day => ({
 							date: day.dimensions.date,

@@ -614,6 +614,10 @@
 									<p>Try checking the format and trying again later, or try a different JA4 fingerprint.</p>
 								</div>
 							`;
+							// Show the results container with the error message
+							loading.style.display = 'none';
+							results.style.display = 'block';
+							analyzeBtn.innerHTML = 'Analyze';
 						} else {
 							showError(`Error: ${errorData.message || 'Failed to analyze JA4 fingerprint'}`);
 						}
@@ -648,7 +652,9 @@
 			}
 			
 			function displayResults(data) {
-				if (data.message) {
+				// Skip the message check for 404 responses which are handled separately
+				// Only check for unexpected error messages
+				if (data.message && !data.error) {
 					errorDiv.textContent = data.message;
 					errorDiv.style.display = 'block';
 					return;
@@ -696,6 +702,7 @@
 						<div class="stat-item">
 							<div class="stat-value">${avgBotScore}</div>
 							<div class="stat-label">Average Bot Score</div>
+							<div style="font-size: 0.8rem; color: #666;">(0-99 scale, higher = more human-like)</div>
 						</div>
 					</div>
 				`;
@@ -739,42 +746,48 @@
 					
 					html += `
 						<div class="table-container">
-							<h3 class="table-title">Hourly Bot Score Analysis</h3>
+							<h3 class="table-title">Hourly Bot Score Analysis (Averages)</h3>
 							<table class="data-table">
 								<thead>
 									<tr>
 										<th>Time (UTC)</th>
 										<th>Bot Score</th>
 										<th>Request Count</th>
+										<th>Data Points</th>
 									</tr>
 								</thead>
 								<tbody>
 									${analysis.trafficBreakdown.hourlyBotScores.map(item => {
 										const date = new Date(item.hour);
+										// Format time to show date and hour with AM/PM
 										const formattedTime = date.toLocaleDateString('en-US', { 
 											month: 'short', 
-											day: 'numeric',
-											hour: '2-digit',
-											minute: '2-digit',
+											day: 'numeric'
+										}) + ' ' + date.toLocaleTimeString('en-US', {
+											hour: 'numeric',
+											hour12: true,
 											timeZone: 'UTC'
-										});
+										}) + ' UTC';
 										
-										// Helper function to classify bot score
+										// Helper function to classify bot score based on Cloudflare's official bot groupings
 										let botClass = '';
 										let botColor = '';
 										
-										if (item.botScore <= 1) {
-											botClass = 'Automated Bot';
-											botColor = '#dc3545';
-										} else if (item.botScore <= 5) {
-											botClass = 'Likely Bot';
-											botColor = '#fd7e14';
-										} else if (item.botScore <= 10) {
-											botClass = 'Possibly Human';
-											botColor = '#ffc107';
+										if (item.botScore === 0) {
+											botClass = 'Not computed';
+											botColor = '#6c757d'; // Gray
+										} else if (item.botScore === 1) {
+											botClass = 'Automated';
+											botColor = '#dc3545'; // Red
+										} else if (item.botScore >= 2 && item.botScore <= 29) {
+											botClass = 'Likely automated';
+											botColor = '#fd7e14'; // Orange
+										} else if (item.botScore >= 30 && item.botScore <= 99) {
+											botClass = 'Likely human';
+											botColor = '#28a745'; // Green
 										} else {
-											botClass = 'Likely Human';
-											botColor = '#28a745';
+											botClass = 'Unknown';
+											botColor = '#6c757d'; // Gray for any other values
 										}
 										
 										return `
@@ -782,6 +795,7 @@
 												<td><strong>${formattedTime}</strong></td>
 												<td><span style="color: ${botColor}; font-weight: bold;">${item.botScore}</span></td>
 												<td><span class="count-badge">${item.count.toLocaleString()}</span></td>
+												<td><span class="count-badge">${item.dataPoints || 1}</span></td>
 											</tr>
 										`;
 									}).join('')}
@@ -838,32 +852,36 @@
 						// Group data by hour and find all unique status codes
 						const hourlyData = {};
 						const allStatusCodes = new Set();
+						const hourOrder = []; // To preserve the original order from API
 						
 						breakdown.statusCodeDistribution.forEach(item => {
 							const hour = item.datetimeHour;
 							if (!hourlyData[hour]) {
 								hourlyData[hour] = {};
+								hourOrder.push(hour); // Keep track of the order hours appear in the data
 							}
 							hourlyData[hour][item.status] = item.count;
 							allStatusCodes.add(item.status);
 						});
 						
-						// Sort status codes and hours
+						// Remove duplicates from hourOrder while preserving order
+						const uniqueHourOrder = [...new Set(hourOrder)];
+						
+						// Sort status codes numerically
 						const sortedStatusCodes = Array.from(allStatusCodes).sort((a, b) => a - b);
-						const sortedHours = Object.keys(hourlyData).sort((a, b) => new Date(b) - new Date(a));
 						
 						// Function to get status color
 						const getStatusColor = (status) => {
-							if (status >= 200 && status < 300) return '#28a745';
-							if (status >= 300 && status < 400) return '#17a2b8';
-							if (status >= 400 && status < 500) return '#ffc107';
-							if (status >= 500) return '#dc3545';
-							return '#6c757d';
+							if (status >= 200 && status < 300) return '#28a745'; // 2xx - Success - Green
+							if (status >= 300 && status < 400) return '#17a2b8'; // 3xx - Redirect - Blue
+							if (status >= 400 && status < 500) return '#ffc107'; // 4xx - Client Error - Yellow
+							if (status >= 500) return '#dc3545'; // 5xx - Server Error - Red
+							return '#6c757d'; // Other - Gray
 						};
 						
 						html += `
 							<div class="table-container">
-								<h3 class="table-title">Hourly Status Code Distribution</h3>
+								<h3 class="table-title">Status Code Distribution by Hour</h3>
 								<table class="data-table">
 									<thead>
 										<tr>
@@ -875,15 +893,17 @@
 										</tr>
 									</thead>
 									<tbody>
-										${sortedHours.map(hour => {
+										${uniqueHourOrder.map(hour => {
 											const date = new Date(hour);
+											// Format time to show date and hour with AM/PM
 											const formattedTime = date.toLocaleDateString('en-US', { 
 												month: 'short', 
-												day: 'numeric',
-												hour: '2-digit',
-												minute: '2-digit',
+												day: 'numeric'
+											}) + ' ' + date.toLocaleTimeString('en-US', {
+												hour: 'numeric',
+												hour12: true,
 												timeZone: 'UTC'
-											});
+											}) + ' UTC';
 											const data = hourlyData[hour];
 											const total = Object.values(data).reduce((sum, count) => sum + count, 0);
 											return `
@@ -1036,71 +1056,6 @@
 						`;
 					}
 
-					// WAF Attack Scores per hour
-					if (breakdown.wafAttackScores && breakdown.wafAttackScores.length > 0) {
-						// Filter to only include hours with attack scores > 0
-						const scoresWithAttacks = breakdown.wafAttackScores.filter(item => 
-							item.overallScore > 0 || item.rceScore > 0 || item.sqliScore > 0 || item.xssScore > 0
-						);
-						
-						if (scoresWithAttacks.length > 0) {
-							html += `
-								<div class="table-container">
-									<h3 class="table-title">WAF Attack Scores (Hourly)</h3>
-									<table class="data-table">
-										<thead>
-											<tr>
-												<th>Time (UTC)</th>
-												<th>Overall Score</th>
-												<th>RCE Score</th>
-												<th>SQL Injection</th>
-												<th>XSS Score</th>
-												<th>Requests</th>
-											</tr>
-										</thead>
-										<tbody>
-											${scoresWithAttacks.map(item => {
-												const date = new Date(item.hour);
-												const formattedTime = date.toLocaleDateString('en-US', { 
-													month: 'short', 
-													day: 'numeric',
-													hour: '2-digit',
-													minute: '2-digit',
-													timeZone: 'UTC'
-												});
-												
-												// Helper function to get color based on score
-												const getScoreColor = (score) => {
-													if (score >= 60) return '#dc3545'; // High - red
-													if (score >= 30) return '#ffc107'; // Medium - yellow
-													if (score > 0) return '#17a2b8';  // Low - blue
-													return '#6c757d'; // None - gray
-												};
-												
-												// Helper function to format score with color
-												const formatScore = (score) => {
-													const color = getScoreColor(score);
-													return `<span style="color: ${color}; font-weight: bold;">${score}</span>`;
-												};
-												
-												return `
-													<tr>
-														<td><strong>${formattedTime}</strong></td>
-														<td>${formatScore(item.overallScore)}</td>
-														<td>${formatScore(item.rceScore)}</td>
-														<td>${formatScore(item.sqliScore)}</td>
-														<td>${formatScore(item.xssScore)}</td>
-														<td><span class="count-badge">${item.count}</span></td>
-													</tr>
-												`;
-											}).join('')}
-										</tbody>
-									</table>
-								</div>
-							`;
-						}
-					}
-
 					// Top WAF rules triggered table
 					if (breakdown.topWafRules && breakdown.topWafRules.length > 0) {
 						html += `
@@ -1130,6 +1085,73 @@
 						`;
 					}
 
+					// WAF Attack Scores per hour
+					if (breakdown.wafAttackScores && breakdown.wafAttackScores.length > 0) {
+						// Filter to only include hours with attack scores > 0
+						const scoresWithAttacks = breakdown.wafAttackScores.filter(item => 
+							item.overallScore > 0 || item.rceScore > 0 || item.sqliScore > 0 || item.xssScore > 0
+						);
+						
+						if (scoresWithAttacks.length > 0) {
+							html += `
+								<div class="table-container">
+									<h3 class="table-title">WAF Attack Scores (Hourly Averages)</h3>
+									<table class="data-table">
+										<thead>
+											<tr>
+												<th>Time (UTC)</th>
+												<th>Overall Score</th>
+												<th>RCE Score</th>
+												<th>SQL Injection</th>
+												<th>XSS Score</th>
+												<th>Data Points</th>
+												<th>Total Requests</th>
+											</tr>
+										</thead>
+										<tbody>
+											${scoresWithAttacks.map(item => {
+												const date = new Date(item.hour);
+												const formattedTime = date.toLocaleDateString('en-US', { 
+													month: 'short', 
+													day: 'numeric',
+													hour: '2-digit',
+													minute: '2-digit',
+													timeZone: 'UTC'
+												});
+												
+												// Helper function to get color based on score
+												// Higher attack score is good (green), lower is bad (red)
+												const getScoreColor = (score) => {
+													if (score >= 80) return '#28a745'; // High score - green (good)
+													if (score < 20) return '#dc3545'; // Low score - red (bad)
+													return '#fd7e14'; // Medium score - orange
+												};
+												
+												// Helper function to format score with color
+												const formatScore = (score) => {
+													const color = getScoreColor(score);
+													return `<span style="color: ${color}; font-weight: bold;">${score}</span>`;
+												};
+												
+												return `
+													<tr>
+														<td><strong>${formattedTime}</strong></td>
+														<td>${formatScore(item.overallScore)}</td>
+														<td>${formatScore(item.rceScore)}</td>
+														<td>${formatScore(item.sqliScore)}</td>
+														<td>${formatScore(item.xssScore)}</td>
+														<td><span class="count-badge">${item.dataPoints || 1}</span></td>
+														<td><span class="count-badge">${item.totalRequests ? item.totalRequests.toLocaleString() : '0'}</span></td>
+													</tr>
+												`;
+											}).join('')}
+										</tbody>
+									</table>
+								</div>
+							`;
+						}
+					}
+					
 					// User agents table has been moved above ASN Distribution
 					
 					// AI Security Analysis Section
